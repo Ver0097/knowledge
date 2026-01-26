@@ -69,9 +69,14 @@ class QAService:
             return None
         
         try:
-            from langchain.chains.combine_documents import create_stuff_documents_chain
-            from langchain.chains import create_retrieval_chain
-            from langchain_core.runnables import RunnablePassthrough
+            # LangChain 1.x 版本使用 Runnable 接口手动构建检索链
+            from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+            from langchain_core.prompts import ChatPromptTemplate
+            
+            # 创建检索器
+            retriever = vectorstore.as_retriever(
+                search_kwargs={"k": 3}  # 检索前3个最相关的文档片段
+            )
             
             # 自定义提示词模板（中文优化）
             prompt_template = """基于以下上下文信息回答问题。如果你不知道答案，就说不知道，不要编造答案。
@@ -83,24 +88,59 @@ class QAService:
 
 请用中文回答："""
             
-            PROMPT = PromptTemplate(
-                template=prompt_template,
-                input_variables=["context", "question"]
+            # 使用 ChatPromptTemplate（兼容 ChatOpenAI）
+            prompt = ChatPromptTemplate.from_template(prompt_template)
+            
+            # 格式化文档的函数
+            def format_docs(docs):
+                return "\n\n".join(doc.page_content for doc in docs)
+            
+            # 构建检索链：检索文档 -> 格式化 -> 生成答案
+            qa_chain = (
+                {
+                    "context": retriever | RunnableLambda(format_docs),
+                    "question": RunnablePassthrough()
+                }
+                | prompt
+                | llm
             )
             
-            # 创建文档链
-            document_chain = create_stuff_documents_chain(llm, PROMPT)
+            # 包装为统一的接口，使其返回包含 "answer" 和 "context" 的字典
+            class QAChainWrapper:
+                def __init__(self, chain, retriever):
+                    self.chain = chain
+                    self.retriever = retriever
+                
+                def invoke(self, input_data):
+                    # 从输入中提取问题
+                    if isinstance(input_data, str):
+                        question = input_data
+                    elif isinstance(input_data, dict):
+                        question = input_data.get("input", input_data.get("question", ""))
+                    else:
+                        question = str(input_data)
+                    
+                    # 检索文档
+                    docs = self.retriever.invoke(question)
+                    
+                    # 使用链生成答案
+                    result = self.chain.invoke(question)
+                    
+                    # 提取答案内容
+                    answer = result.content if hasattr(result, 'content') else str(result)
+                    
+                    # 返回统一格式（兼容旧版本）
+                    return {
+                        "answer": answer,
+                        "context": docs,
+                        "result": answer  # 兼容旧版本的字段名
+                    }
             
-            # 创建检索链
-            retriever = vectorstore.as_retriever(
-                search_kwargs={"k": 3}  # 检索前3个最相关的文档片段
-            )
-            
-            qa_chain = create_retrieval_chain(retriever, document_chain)
-            
-            return qa_chain
+            return QAChainWrapper(qa_chain, retriever)
         except Exception as e:
             print(f"创建问答链失败：{str(e)}")
+            import traceback
+            traceback.print_exc()
             return None
     
     async def answer_question(
