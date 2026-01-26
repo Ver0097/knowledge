@@ -8,7 +8,12 @@ from pathlib import Path
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
-from langchain_community.vectorstores import Chroma
+# 导入Chroma - 优先使用新的langchain-chroma包
+try:
+    from langchain_chroma import Chroma
+except ImportError:
+    # 如果新包不可用，则回退到旧版本
+    from langchain_community.vectorstores import Chroma
 try:
     from langchain_huggingface import HuggingFaceEmbeddings
 except ImportError:
@@ -127,8 +132,7 @@ class DocumentService:
                 collection_name=collection_name
             )
             
-            # 持久化到磁盘
-            vectorstore.persist()
+            # 注意：Chroma 0.4.x以上版本会自动持久化，无需手动调用
             
             # 4. 清理临时文件（可选）
             # os.remove(file_path)
