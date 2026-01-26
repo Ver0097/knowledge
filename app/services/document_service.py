@@ -10,7 +10,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
 # 导入Chroma - 优先使用新的langchain-chroma包
 try:
-    from langchain_chroma import Chroma
+    from langchain_chroma import Chroma  # type: ignore
 except ImportError:
     # 如果新包不可用，则回退到旧版本
     from langchain_community.vectorstores import Chroma
