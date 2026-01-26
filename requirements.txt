@@ -1,0 +1,30 @@
+# FastAPI
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# LangChain
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-openai>=0.0.2
+langchain-text-splitters>=0.0.1
+langchain-huggingface>=0.0.0
+
+# OpenAI SDK for DeepSeek API
+openai>=1.0.0
+
+# Vector Database
+chromadb>=0.4.0
+
+# Document Processing
+pypdf>=3.17.0
+python-docx>=1.1.0
+
+# Embedding Model
+sentence-transformers>=2.2.0
+torch>=2.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
