@@ -23,8 +23,10 @@ python-docx>=1.1.0
 docx2txt>=0.8
 
 # Embedding Model
-sentence-transformers>=2.2.0
+sentence-transformers>=3.0.0
 torch>=2.0.0
+# Optional: einops is sometimes needed for some BGE models
+einops>=0.7.0
 
 # Utilities
 python-dotenv>=1.0.0

@@ -15,7 +15,7 @@
 - **后端框架**：FastAPI
 - **AI框架**：LangChain
 - **向量数据库**：Chroma
-- **嵌入模型**：sentence-transformers (paraphrase-multilingual-MiniLM-L12-v2)
+- **嵌入模型**：BAAI/bge-small-zh-v1.5
 - **LLM API**：DeepSeek API（与OpenAI API兼容，[文档](https://api-docs.deepseek.com/zh-cn/)）
 - **文档处理**：PyPDF, python-docx
 - **前端**：JSP + HTML + CSS + JavaScript
@@ -45,7 +45,7 @@ pip install -r requirements.txt
 
 ### 4. 下载嵌入模型（首次运行会自动下载）
 
-系统使用 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` 模型，首次运行时会自动下载（约 400MB）。
+系统使用 `BAAI/bge-small-zh-v1.5` 模型，首次运行时会自动下载（约 100MB）。
 
 ### 5. 启动服务
 
@@ -152,7 +152,7 @@ self.text_splitter = RecursiveCharacterTextSplitter(
 
 ### 嵌入模型
 
-默认使用多语言模型，支持中英文。如需更换模型，修改 `document_service.py` 中的模型名称：
+默认使用 BGE 中文模型，支持中英文。如需更换模型，修改 `document_service.py` 中的模型名称：
 
 ```python
 self.embeddings = HuggingFaceEmbeddings(

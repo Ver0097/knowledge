@@ -33,7 +33,7 @@ class DocumentService:
         # 初始化嵌入模型（使用本地模型，无需API密钥）
         # 使用中文友好的多语言模型
         self.embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            model_name="BAAI/bge-small-zh-v1.5",
             model_kwargs={'device': 'cpu'}  # 如果有GPU可改为'cuda'
         )
         
