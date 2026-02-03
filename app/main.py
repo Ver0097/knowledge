@@ -157,7 +157,7 @@ async def list_collections():
 
 
 @app.get("/api/chunks/{collection_name}")
-async def get_document_chunks(collection_name: str = "default", limit: int = 10):
+async def get_document_chunks(collection_name: str = "default", limit: int = 10, offset: int = 0):
     """
     获取指定集合的文档片段内容
     用于调试和查看已上传文档的具体内容
@@ -168,7 +168,8 @@ async def get_document_chunks(collection_name: str = "default", limit: int = 10)
             
         chunks_data = document_service.get_document_chunks(
             collection_name=collection_name,
-            limit=limit
+            limit=limit,
+            offset=offset
         )
         
         return JSONResponse(content=chunks_data)

@@ -5,6 +5,10 @@
 import os
 from typing import List, Dict
 from pathlib import Path
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 from langchain_text_splitters import SentenceTransformersTokenTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
@@ -30,23 +34,65 @@ class DocumentService:
     
     def __init__(self):
         """初始化文档服务"""
-        # 初始化嵌入模型（使用本地模型，无需API密钥）
-        # 使用中文友好的多语言模型
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name="BAAI/bge-small-zh-v1.5",
-            model_kwargs={'device': 'cpu'}  # 如果有GPU可改为'cuda'
-        )
+        # 延迟初始化嵌入模型和文本分割器，仅在需要时才加载
+        self._embeddings = None
+        self._text_splitter = None
+        
+        # 从环境变量获取模型路径
+        self.model_path = os.getenv('MODEL_PATH', 'BAAI/bge-small-zh-v1.5')
+        
+        # 设置离线模式
+        if os.getenv('HF_HUB_OFFLINE') == '1':
+            os.environ['HF_HUB_OFFLINE'] = '1'
+            os.environ['TRANSFORMERS_OFFLINE'] = '1'
         
         # 向量数据库存储路径
         self.persist_directory = "./chroma_db"
         os.makedirs(self.persist_directory, exist_ok=True)
-        
-        # 文本分割器配置 - 使用基于token的分割器，更适合BGE模型
-        self.text_splitter = SentenceTransformersTokenTextSplitter(
-            model_name="BAAI/bge-small-zh-v1.5",
-            tokens_per_chunk=512,    # 每个切片512个token
-            chunk_overlap=64         # 切片之间重叠64个token，保持上下文连贯
-        )
+    
+    @property
+    def embeddings(self):
+        """懒加载嵌入模型 - 使用本地模型路径"""
+        if self._embeddings is None:
+            print(f"正在从本地路径加载嵌入模型: {self.model_path}")
+            
+            # 检查模型路径是否存在
+            if os.path.exists(self.model_path):
+                # 使用本地模型路径
+                self._embeddings = HuggingFaceEmbeddings(
+                    model_name=self.model_path,
+                    model_kwargs={'device': 'cpu'},  # 如果有GPU可改为'cuda'
+                    encode_kwargs={'normalize_embeddings': True}  # 归一化嵌入向量
+                )
+                print("✓ 本地模型加载成功")
+            else:
+                # 回退到在线下载模式
+                print(f"警告: 本地模型路径不存在 ({self.model_path})，将尝试从 Hugging Face 下载")
+                self._embeddings = HuggingFaceEmbeddings(
+                    model_name="BAAI/bge-small-zh-v1.5",
+                    model_kwargs={'device': 'cpu'}
+                )
+        return self._embeddings
+    
+    @property
+    def text_splitter(self):
+        """懒加载文本分割器"""
+        if self._text_splitter is None:
+            print("正在初始化文本分割器...")
+            # 文本分割器使用本地模型路径
+            if os.path.exists(self.model_path):
+                self._text_splitter = SentenceTransformersTokenTextSplitter(
+                    model_name=self.model_path,
+                    tokens_per_chunk=512,    # 每个切片512个token
+                    chunk_overlap=64         # 切片之间重叠64个token，保持上下文连贯
+                )
+            else:
+                self._text_splitter = SentenceTransformersTokenTextSplitter(
+                    model_name="BAAI/bge-small-zh-v1.5",
+                    tokens_per_chunk=512,
+                    chunk_overlap=64
+                )
+        return self._text_splitter
     
     def load_document(self, file_path: str) -> List[Document]:
         """
@@ -192,13 +238,14 @@ class DocumentService:
             collection_name=collection_name
         )
     
-    def get_document_chunks(self, collection_name: str = "default", limit: int = 10):
+    def get_document_chunks(self, collection_name: str = "default", limit: int = 10, offset: int = 0):
         """
         获取指定集合中的文档片段内容（用于调试和查看）
         
         Args:
             collection_name: 集合名称
             limit: 返回的片段数量限制
+            offset: 偏移量，用于分页
             
         Returns:
             包含文档片段信息的字典列表
@@ -216,10 +263,11 @@ class DocumentService:
                 documents = collection_data.get('documents', [])
                 metadatas = collection_data.get('metadatas', [])
                 
-                # 限制返回数量
-                doc_count = min(len(documents), limit)
+                # 应用偏移量和限制
+                start_idx = offset
+                end_idx = min(offset + limit, len(documents))
                 
-                for i in range(doc_count):
+                for i in range(start_idx, end_idx):
                     chunk_info = {
                         "id": i + 1,
                         "content": documents[i] if i < len(documents) else "",

@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文档片段查看器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;
+            background: #ffffff;
+            color: #1a1a1a;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: #ffffff;
+            border: 2px solid #1a1a1a;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .header {
+            background: #ffffff;
+            border-bottom: 3px solid #1a1a1a;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2em;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin-bottom: 10px;
+        }
+        
+        .controls {
+            padding: 20px 30px;
+            background: #f5f5f5;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .collection-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .collection-selector label {
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+        
+        .collection-selector select {
+            padding: 8px 12px;
+            border: 2px solid #1a1a1a;
+            border-radius: 4px;
+            font-size: 1em;
+        }
+        
+        .page-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .page-btn {
+            background: #1a1a1a;
+            color: #ffffff;
+            padding: 8px 16px;
+            border: 2px solid #1a1a1a;
+            border-radius: 4px;
+            font-size: 0.9em;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .page-btn:hover:not(:disabled) {
+            background: #000000;
+            transform: translateY(-1px);
+        }
+        
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .page-info {
+            font-size: 0.9em;
+            color: #1a1a1a;
+            min-width: 150px;
+            text-align: center;
+        }
+        
+        .page-size-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .page-size-selector label {
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+        
+        .page-size-selector select {
+            padding: 6px 10px;
+            border: 1px solid #1a1a1a;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        
+        .content {
+            padding: 30px;
+            background: #ffffff;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #666;
+            font-size: 1.1em;
+        }
+        
+        .error {
+            background: #fff5f5;
+            color: #c53030;
+            padding: 20px;
+            border: 2px solid #c53030;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            font-size: 0.95em;
+        }
+        
+        .chunks-container {
+            display: grid;
+            gap: 25px;
+        }
+        
+        .chunk-card {
+            background: #ffffff;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .chunk-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .chunk-id {
+            font-weight: 600;
+            color: #1a1a1a;
+            font-size: 1.1em;
+        }
+        
+        .chunk-meta {
+            font-size: 0.85em;
+            color: #666;
+            text-align: right;
+        }
+        
+        .chunk-content {
+            background: #fafafa;
+            padding: 15px;
+            border-radius: 4px;
+            line-height: 1.6;
+            font-size: 0.95em;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .pagination-info {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-size: 0.9em;
+            border-top: 1px solid #eee;
+            margin-top: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            .container {
+                border-width: 1px;
+            }
+            
+            .header {
+                padding: 20px;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .collection-selector, .page-controls, .page-size-selector {
+                justify-content: center;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>文档片段查看器</h1>
+            <p>浏览和管理已上传文档的切片内容</p>
+        </div>
+        
+        <div class="controls">
+            <div class="collection-selector">
+                <label for="collectionSelect">知识库：</label>
+                <select id="collectionSelect">
+                    <option value="default">默认知识库</option>
+                </select>
+            </div>
+            
+            <div class="page-controls">
+                <button class="page-btn" id="firstPageBtn" onclick="goToPage(1)" title="首页">首页</button>
+                <button class="page-btn" id="prevPageBtn" onclick="prevPage()" title="上一页">上一页</button>
+                <span class="page-info" id="pageInfo">第 1 页，共 0 页 (0 条记录)</span>
+                <button class="page-btn" id="nextPageBtn" onclick="nextPage()" title="下一页">下一页</button>
+                <button class="page-btn" id="lastPageBtn" onclick="goToLastPage()" title="末页">末页</button>
+            </div>
+            
+            <div class="page-size-selector">
+                <label for="pageSizeSelect">每页:</label>
+                <select id="pageSizeSelect" onchange="changePageSize()">
+                    <option value="5">5条</option>
+                    <option value="10" selected>10条</option>
+                    <option value="20">20条</option>
+                    <option value="50">50条</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="content">
+            <div id="chunksContainer" class="chunks-container">
+                <div class="loading" id="loadingDiv">
+                    正在加载文档片段...
+                </div>
+            </div>
+            <div id="paginationInfo" class="pagination-info" style="display: none;"></div>
+        </div>
+    </div>
+    
+    <script>
+        // 配置API基础地址
+        const API_BASE = 'http://localhost:8000/api';
+        
+        // 分页状态
+        let currentPage = 1;
+        let totalPages = 0;
+        let totalItems = 0;
+        let pageSize = 10;
+        let currentCollection = 'default';
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCollections();
+            loadChunks(currentPage, pageSize, currentCollection);
+        });
+        
+        // 加载知识库集合列表
+        async function loadCollections() {
+            try {
+                const response = await fetch(`${API_BASE}/collections`);
+                const result = await response.json();
+                
+                if (response.ok && result.collections) {
+                    const select = document.getElementById('collectionSelect');
+                    select.innerHTML = '';
+                    
+                    result.collections.forEach(collection => {
+                        const option = document.createElement('option');
+                        option.value = collection;
+                        option.textContent = collection;
+                        select.appendChild(option);
+                    });
+                    
+                    // 默认选择第一个选项
+                    if (result.collections.length > 0) {
+                        currentCollection = result.collections[0];
+                        select.value = currentCollection;
+                    }
+                }
+            } catch (error) {
+                console.error('加载知识库列表失败:', error);
+            }
+        }
+        
+        // 更改知识库时重新加载
+        document.getElementById('collectionSelect').addEventListener('change', function() {
+            currentCollection = this.value;
+            currentPage = 1;
+            loadChunks(currentPage, pageSize, currentCollection);
+        });
+        
+        // 加载文档片段
+        async function loadChunks(page, size, collection) {
+            const offset = (page - 1) * size;
+            const chunksContainer = document.getElementById('chunksContainer');
+            const loadingDiv = document.getElementById('loadingDiv');
+            
+            // 显示加载状态
+            chunksContainer.innerHTML = '<div class="loading" id="loadingDiv">正在加载文档片段...</div>';
+            
+            try {
+                // 调用API获取文档片段，使用offset和limit实现分页
+                const response = await fetch(`${API_BASE}/chunks/${collection}?limit=${size}&offset=${offset}`);
+                const result = await response.json();
+                
+                if (response.ok) {
+                    renderChunks(result);
+                } else {
+                    chunksContainer.innerHTML = `<div class="error">加载文档片段失败：${result.detail || '未知错误'}</div>`;
+                }
+            } catch (error) {
+                chunksContainer.innerHTML = `<div class="error">加载文档片段时发生错误：${error.message}</div>`;
+            }
+        }
+        
+        // 渲染文档片段
+        function renderChunks(data) {
+            const chunksContainer = document.getElementById('chunksContainer');
+            
+            // 更新分页信息
+            totalItems = data.total_chunks || (data.chunks ? data.chunks.length : 0);
+            totalPages = Math.ceil(totalItems / pageSize);
+            
+            if (totalPages === 0 && data.chunks) {
+                // 如果API没有返回total_chunks，尝试从chunks数量计算
+                totalItems = data.chunks.length;
+                totalPages = 1;
+            }
+            
+            updatePaginationControls();
+            
+            // 构建HTML
+            if (data.chunks && data.chunks.length > 0) {
+                let html = '';
+                
+                data.chunks.forEach((chunk, index) => {
+                    const actualIndex = (currentPage - 1) * pageSize + index + 1;
+                    
+                    html += `
+                        <div class="chunk-card">
+                            <div class="chunk-header">
+                                <div class="chunk-id">片段 #${actualIndex}</div>
+                                <div class="chunk-meta">
+                                    长度: ${chunk.content_length || chunk.content.length} 字符<br>
+                                    来源: ${chunk.metadata?.source || '未知'}
+                                </div>
+                            </div>
+                            <div class="chunk-content">${escapeHtml(chunk.content)}</div>
+                        </div>
+                    `;
+                });
+                
+                chunksContainer.innerHTML = html;
+                
+                // 显示分页信息
+                const paginationInfo = document.getElementById('paginationInfo');
+                paginationInfo.style.display = 'block';
+                paginationInfo.textContent = `显示第 ${(currentPage-1)*pageSize+1} 到 ${Math.min(currentPage*pageSize, totalItems)} 条，共 ${totalItems} 条记录`;
+            } else {
+                chunksContainer.innerHTML = '<div class="error">未找到任何文档片段</div>';
+                document.getElementById('paginationInfo').style.display = 'none';
+            }
+        }
+        
+        // 转义HTML以防止XSS攻击
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // 更新分页控件状态
+        function updatePaginationControls() {
+            document.getElementById('pageInfo').textContent = 
+                `第 ${currentPage} 页，共 ${totalPages} 页 (${totalItems} 条记录)`;
+            
+            document.getElementById('firstPageBtn').disabled = currentPage <= 1;
+            document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+            document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
+            document.getElementById('lastPageBtn').disabled = currentPage >= totalPages || totalPages === 0;
+        }
+        
+        // 下一页
+        function nextPage() {
+            if (currentPage < totalPages) {
+                currentPage++;
+                loadChunks(currentPage, pageSize, currentCollection);
+            }
+        }
+        
+        // 上一页
+        function prevPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                loadChunks(currentPage, pageSize, currentCollection);
+            }
+        }
+        
+        // 跳转到指定页面
+        function goToPage(page) {
+            if (page >= 1 && page <= totalPages) {
+                currentPage = page;
+                loadChunks(currentPage, pageSize, currentCollection);
+            }
+        }
+        
+        // 跳转到最后一页
+        function goToLastPage() {
+            if (totalPages > 0) {
+                currentPage = totalPages;
+                loadChunks(currentPage, pageSize, currentCollection);
+            }
+        }
+        
+        // 更改每页显示数量
+        function changePageSize() {
+            pageSize = parseInt(document.getElementById('pageSizeSelect').value);
+            currentPage = 1; // 重置到第一页
+            loadChunks(currentPage, pageSize, currentCollection);
+        }
+        
+        // 键盘事件支持（页面跳转）
+        document.addEventListener('keydown', function(event) {
+            // 方向键左 - 上一页
+            if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                prevPage();
+            }
+            // 方向键右 - 下一页
+            else if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                nextPage();
+            }
+        });
+    </script>
+</body>
+</html>

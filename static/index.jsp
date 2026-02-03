@@ -347,10 +347,9 @@
                     <div id="uploadStatus"></div>
                     <!-- 查看片段按钮 -->
                     <div id="viewChunksSection" style="display: none; margin-top: 20px;">
-                        <button class="upload-btn" onclick="viewDocumentChunks()" style="background: #28a745; border-color: #28a745;">
+                        <button class="upload-btn" onclick="openChunksViewerPage()" style="background: #007bff; border-color: #007bff;">
                             查看文档片段
                         </button>
-                        <div id="chunksViewer" style="margin-top: 20px; display: none;"></div>
                     </div>
                 </div>
             </div>
@@ -419,7 +418,6 @@
             uploadStatus.innerHTML = '<div class="loading">正在上传和处理文档...</div>';
             // 隐藏查看片段区域
             document.getElementById('viewChunksSection').style.display = 'none';
-            document.getElementById('chunksViewer').style.display = 'none';
                     
             const formData = new FormData();
             formData.append('file', file);
@@ -445,100 +443,9 @@
             }
         }
                 
-        // 查看文档片段功能
-        async function viewDocumentChunks() {
-            const chunksViewer = document.getElementById('chunksViewer');
-            chunksViewer.style.display = 'block';
-            chunksViewer.innerHTML = '<div class="loading">正在加载文档片段...</div>';
-                    
-            try {
-                const response = await fetch(`${API_BASE}/chunks/default?limit=15`);
-                const result = await response.json();
-                        
-                if (response.ok && result.chunks) {
-                    let html = `<div class="answer-title">文档片段 (${result.total_chunks} 个片段中的 ${result.returned_chunks} 个)</div>`;
-                            
-                    if (result.chunks.length > 0) {
-                        result.chunks.forEach(chunk => {
-                            const shortContent = chunk.content.length > 300 
-                                ? chunk.content.substring(0, 300) + '...'
-                                : chunk.content;
-                                    
-                            html += `
-                                <div style="margin-bottom: 20px; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 4px;">
-                                    <div style="font-weight: 600; color: #1a1a1a; margin-bottom: 10px;">
-                                        片段 ${chunk.id} (长度: ${chunk.content_length} 字符)
-                                    </div>
-                                    <div style="background: #fafafa; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
-                                        <div style="white-space: pre-wrap; line-height: 1.5; font-size: 0.9em;">${shortContent}</div>
-                                    </div>
-                                    <div style="font-size: 0.85em; color: #666;">
-                                        来源: ${chunk.metadata.source || '未知'}
-                                    </div>
-                                </div>
-                            `;
-                        });
-                                
-                        // 添加查看全部按钮（如果还有更多）
-                        if (result.total_chunks > result.returned_chunks) {
-                            html += `
-                                <div style="text-align: center; margin-top: 20px;">
-                                    <button class="upload-btn" onclick="viewAllChunks()" style="background: #007bff; border-color: #007bff;">
-                                        查看全部 ${result.total_chunks} 个片段
-                                    </button>
-                                </div>
-                            `;
-                        }
-                    } else {
-                        html += '<div class="error">未找到文档片段</div>';
-                    }
-                            
-                    chunksViewer.innerHTML = html;
-                } else {
-                    chunksViewer.innerHTML = `<div class="error">获取片段失败：${result.detail || result.error || '未知错误'}</div>`;
-                }
-            } catch (error) {
-                chunksViewer.innerHTML = `<div class="error">加载出错：${error.message}</div>`;
-            }
-        }
-                
-        // 查看全部片段
-        async function viewAllChunks() {
-            const chunksViewer = document.getElementById('chunksViewer');
-            chunksViewer.innerHTML = '<div class="loading">正在加载全部文档片段...</div>';
-                    
-            try {
-                const response = await fetch(`${API_BASE}/chunks/default?limit=100`);
-                const result = await response.json();
-                        
-                if (response.ok && result.chunks) {
-                    let html = `<div class="answer-title">全部文档片段 (${result.total_chunks} 个)</div>`;
-                            
-                    result.chunks.forEach(chunk => {
-                        const shortContent = chunk.content.length > 300 
-                            ? chunk.content.substring(0, 300) + '...'
-                            : chunk.content;
-                                
-                        html += `
-                            <div style="margin-bottom: 20px; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 4px;">
-                                <div style="font-weight: 600; color: #1a1a1a; margin-bottom: 10px;">
-                                    片段 ${chunk.id} (长度: ${chunk.content_length} 字符)
-                                </div>
-                                <div style="background: #fafafa; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
-                                    <div style="white-space: pre-wrap; line-height: 1.5; font-size: 0.9em;">${shortContent}</div>
-                                </div>
-                                <div style="font-size: 0.85em; color: #666;">
-                                    来源: ${chunk.metadata.source || '未知'}
-                                </div>
-                            </div>
-                        `;
-                    });
-                            
-                    chunksViewer.innerHTML = html;
-                }
-            } catch (error) {
-                chunksViewer.innerHTML = `<div class="error">加载出错：${error.message}</div>`;
-            }
+        // 打开新页面查看文档片段
+        function openChunksViewerPage() {
+            window.open('/static/document_chunks.html', '_blank');
         }
         
         // 问答相关
