@@ -156,6 +156,27 @@ async def list_collections():
         raise HTTPException(status_code=500, detail=f"获取集合列表出错：{str(e)}")
 
 
+@app.get("/api/chunks/{collection_name}")
+async def get_document_chunks(collection_name: str = "default", limit: int = 10):
+    """
+    获取指定集合的文档片段内容
+    用于调试和查看已上传文档的具体内容
+    """
+    try:
+        if limit > 50:  # 限制最大返回数量
+            limit = 50
+            
+        chunks_data = document_service.get_document_chunks(
+            collection_name=collection_name,
+            limit=limit
+        )
+        
+        return JSONResponse(content=chunks_data)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取文档片段失败：{str(e)}")
+
+
 @app.delete("/api/collection/{collection_name}")
 async def delete_collection(collection_name: str):
     """删除指定的知识库集合"""

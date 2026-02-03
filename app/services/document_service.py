@@ -191,3 +191,59 @@ class DocumentService:
             embedding_function=self.embeddings,
             collection_name=collection_name
         )
+    
+    def get_document_chunks(self, collection_name: str = "default", limit: int = 10):
+        """
+        获取指定集合中的文档片段内容（用于调试和查看）
+        
+        Args:
+            collection_name: 集合名称
+            limit: 返回的片段数量限制
+            
+        Returns:
+            包含文档片段信息的字典列表
+        """
+        try:
+            vectorstore = self.get_vectorstore(collection_name)
+            
+            # 获取集合中的所有文档
+            # 注意：Chroma的get()方法返回格式可能因版本而异
+            try:
+                # 尝试获取文档内容
+                collection_data = vectorstore.get()
+                
+                chunks = []
+                documents = collection_data.get('documents', [])
+                metadatas = collection_data.get('metadatas', [])
+                
+                # 限制返回数量
+                doc_count = min(len(documents), limit)
+                
+                for i in range(doc_count):
+                    chunk_info = {
+                        "id": i + 1,
+                        "content": documents[i] if i < len(documents) else "",
+                        "metadata": metadatas[i] if i < len(metadatas) else {},
+                        "content_length": len(documents[i]) if i < len(documents) else 0
+                    }
+                    chunks.append(chunk_info)
+                
+                return {
+                    "collection_name": collection_name,
+                    "total_chunks": len(documents),
+                    "returned_chunks": len(chunks),
+                    "chunks": chunks
+                }
+                
+            except Exception as e:
+                # 如果直接get()失败，尝试其他方式
+                print(f"直接获取失败，尝试替代方法：{str(e)}")
+                # 返回基本信息
+                return {
+                    "collection_name": collection_name,
+                    "error": f"无法直接获取文档内容：{str(e)}",
+                    "suggestion": "请使用问答接口查看相关内容"
+                }
+                
+        except Exception as e:
+            raise Exception(f"获取文档片段失败：{str(e)}")
