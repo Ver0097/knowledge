@@ -169,9 +169,10 @@ self.embeddings = HuggingFaceEmbeddings(
 编辑 `app/services/document_service.py`：
 
 ```python
-self.text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,    # 增大切片大小
-    chunk_overlap=100,  # 增大重叠
+self.text_splitter = SentenceTransformersTokenTextSplitter(
+    model_name="BAAI/bge-small-zh-v1.5",
+    tokens_per_chunk=512,    # 每个切片token数（最大512）
+    chunk_overlap=64,        # 重叠token数
 )
 ```
 

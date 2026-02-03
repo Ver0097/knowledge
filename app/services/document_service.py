@@ -6,7 +6,7 @@ import os
 from typing import List, Dict
 from pathlib import Path
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import SentenceTransformersTokenTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
 # 导入Chroma - 优先使用新的langchain-chroma包
 try:
@@ -41,11 +41,11 @@ class DocumentService:
         self.persist_directory = "./chroma_db"
         os.makedirs(self.persist_directory, exist_ok=True)
         
-        # 文本分割器配置
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,  # 每个切片500字符
-            chunk_overlap=50,  # 切片之间重叠50字符，保持上下文连贯
-            length_function=len,
+        # 文本分割器配置 - 使用基于token的分割器，更适合BGE模型
+        self.text_splitter = SentenceTransformersTokenTextSplitter(
+            model_name="BAAI/bge-small-zh-v1.5",
+            tokens_per_chunk=512,    # 每个切片512个token
+            chunk_overlap=64         # 切片之间重叠64个token，保持上下文连贯
         )
     
     def load_document(self, file_path: str) -> List[Document]:

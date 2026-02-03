@@ -144,9 +144,10 @@ langchain-demo/
 在 `app/services/document_service.py` 中可以调整切片参数：
 
 ```python
-self.text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=500,      # 每个切片字符数
-    chunk_overlap=50,    # 切片重叠字符数
+self.text_splitter = SentenceTransformersTokenTextSplitter(
+    model_name="BAAI/bge-small-zh-v1.5",
+    tokens_per_chunk=512,    # 每个切片token数
+    chunk_overlap=64,        # 切片重叠token数
 )
 ```
 
