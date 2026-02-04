@@ -13,7 +13,7 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;
-            background: #ffffff;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: #1a1a1a;
             min-height: 100vh;
             padding: 20px;
@@ -30,29 +30,52 @@
         }
         
         .header {
-            background: #ffffff;
-            border-bottom: 3px solid #1a1a1a;
-            padding: 40px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 60px 40px;
             text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+            animation: headerGlow 15s linear infinite;
+        }
+        
+        @keyframes headerGlow {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
         
         .header h1 {
             font-size: 2.2em;
             font-weight: 700;
-            color: #1a1a1a;
+            color: #ffffff;
             margin-bottom: 12px;
             letter-spacing: -0.5px;
+            position: relative;
+            z-index: 1;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
         }
         
         .header p {
             font-size: 1em;
-            color: #666;
+            color: rgba(255,255,255,0.95);
             font-weight: 400;
+            position: relative;
+            z-index: 1;
         }
         
         .content {
             padding: 40px 30px;
             background: #ffffff;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
         }
         
         .section {
@@ -66,10 +89,10 @@
         .section-title {
             font-size: 1.4em;
             font-weight: 600;
-            color: #1a1a1a;
+            color: #667eea;
             margin-bottom: 24px;
             padding-bottom: 12px;
-            border-bottom: 2px solid #1a1a1a;
+            border-bottom: 2px solid #667eea;
             display: flex;
             align-items: center;
             gap: 8px;
@@ -79,23 +102,26 @@
             content: '';
             width: 4px;
             height: 20px;
-            background: #1a1a1a;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             display: inline-block;
+            border-radius: 2px;
         }
         
         .upload-area {
-            border: 2px dashed #1a1a1a;
-            border-radius: 6px;
+            border: 2px dashed #667eea;
+            border-radius: 12px;
             padding: 50px 30px;
             text-align: center;
-            background: #fafafa;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
             transition: all 0.3s ease;
             cursor: pointer;
         }
         
         .upload-area:hover {
-            background: #f5f5f5;
-            border-color: #000000;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+            border-color: #764ba2;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.2);
         }
         
         .upload-area.dragover {
@@ -124,22 +150,22 @@
         }
         
         .upload-btn {
-            background: #1a1a1a;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: #ffffff;
-            padding: 12px 32px;
-            border: 2px solid #1a1a1a;
-            border-radius: 4px;
+            padding: 14px 36px;
+            border: none;
+            border-radius: 8px;
             font-size: 1em;
-            font-weight: 500;
+            font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.3s ease;
             margin-top: 20px;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
         }
         
         .upload-btn:hover {
-            background: #000000;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px rgba(102, 126, 234, 0.4);
         }
         
         .upload-btn:active {
@@ -165,18 +191,19 @@
         .question-input {
             flex: 1;
             padding: 14px 18px;
-            border: 2px solid #1a1a1a;
-            border-radius: 4px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
             font-size: 1em;
             background: #ffffff;
             color: #1a1a1a;
             outline: none;
-            transition: all 0.2s;
+            transition: all 0.3s ease;
         }
         
         .question-input:focus {
-            border-color: #000000;
-            box-shadow: 0 0 0 3px rgba(0,0,0,0.1);
+            border-color: #764ba2;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+            transform: translateY(-1px);
         }
         
         .question-input::placeholder {
@@ -184,22 +211,22 @@
         }
         
         .ask-btn {
-            background: #1a1a1a;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: #ffffff;
             padding: 14px 32px;
-            border: 2px solid #1a1a1a;
-            border-radius: 4px;
+            border: none;
+            border-radius: 8px;
             font-size: 1em;
-            font-weight: 500;
+            font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.3s ease;
             white-space: nowrap;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
         }
         
         .ask-btn:hover:not(:disabled) {
-            background: #000000;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px rgba(102, 126, 234, 0.4);
         }
         
         .ask-btn:active:not(:disabled) {
@@ -214,21 +241,22 @@
         }
         
         .answer-area {
-            background: #fafafa;
-            border: 2px solid #1a1a1a;
-            border-radius: 6px;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+            border: 2px solid #667eea;
+            border-radius: 12px;
             padding: 24px;
             margin-top: 20px;
             min-height: 120px;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.1);
         }
         
         .answer-title {
             font-weight: 600;
-            color: #1a1a1a;
+            color: #667eea;
             margin-bottom: 16px;
             font-size: 1.1em;
             padding-bottom: 12px;
-            border-bottom: 1px solid #ddd;
+            border-bottom: 2px solid #667eea;
         }
         
         .answer-content {
@@ -346,18 +374,18 @@
                     <div class="file-info" id="fileInfo"></div>
                     <div id="uploadStatus"></div>
                     <!-- 查看片段按钮 -->
-                    <div id="viewChunksSection" style="display: none; margin-top: 20px;">
-                        <button class="upload-btn" onclick="openChunksViewerPage()" style="background: #007bff; border-color: #007bff;">
-                            查看文档片段
+                    <div id="viewChunksSection" style="display: none; margin-top: 24px;">
+                        <button class="upload-btn" onclick="openChunksViewerPage()" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
+                            🔍 查看文档片段
                         </button>
                     </div>
                     <!-- 文档管理按钮 -->
-                    <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center;">
-                        <button class="upload-btn" onclick="openDocumentManager()" style="background: #28a745; border-color: #28a745;">
-                            文档管理
+                    <div style="margin-top: 24px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                        <button class="upload-btn" onclick="openDocumentManager()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                            📁 文档管理
                         </button>
-                        <button class="upload-btn" onclick="clearKnowledgeBase()" style="background: #dc3545; border-color: #dc3545;">
-                            清空知识库
+                        <button class="upload-btn" onclick="clearKnowledgeBase()" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+                            🗑️ 清空知识库
                         </button>
                     </div>
                 </div>
