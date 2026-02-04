@@ -351,6 +351,15 @@
                             查看文档片段
                         </button>
                     </div>
+                    <!-- 文档管理按钮 -->
+                    <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center;">
+                        <button class="upload-btn" onclick="openDocumentManager()" style="background: #28a745; border-color: #28a745;">
+                            文档管理
+                        </button>
+                        <button class="upload-btn" onclick="clearKnowledgeBase()" style="background: #dc3545; border-color: #dc3545;">
+                            清空知识库
+                        </button>
+                    </div>
                 </div>
             </div>
             
@@ -446,6 +455,37 @@
         // 打开新页面查看文档片段
         function openChunksViewerPage() {
             window.open('/static/document_chunks.html', '_blank');
+        }
+        
+        // 打开文档管理页面
+        function openDocumentManager() {
+            window.open('/static/document_manager.html', '_blank');
+        }
+        
+        // 清空知识库
+        async function clearKnowledgeBase() {
+            if (!confirm('确定要清空所有文档吗？此操作不可恢复！')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/collection/default`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    alert('知识库已清空！');
+                    uploadStatus.innerHTML = '';
+                    fileInfo.textContent = '';
+                    document.getElementById('viewChunksSection').style.display = 'none';
+                } else {
+                    alert(`清空失败：${result.detail || '未知错误'}`);
+                }
+            } catch (error) {
+                alert(`清空出错：${error.message}`);
+            }
         }
         
         // 问答相关

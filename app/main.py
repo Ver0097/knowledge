@@ -188,6 +188,19 @@ async def delete_collection(collection_name: str):
         raise HTTPException(status_code=500, detail=f"删除集合出错：{str(e)}")
 
 
+@app.get("/api/documents/{collection_name}")
+async def get_documents_list(collection_name: str = "default"):
+    """
+    获取指定集合中的所有文档列表（按文件名分组）
+    用于文档管理功能
+    """
+    try:
+        documents_data = document_service.get_documents_list(collection_name=collection_name)
+        return JSONResponse(content=documents_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取文档列表失败：{str(e)}")
+
+
 if __name__ == "__main__":
     # 启动服务
     # 使用127.0.0.1确保本地访问，同时允许外部访问

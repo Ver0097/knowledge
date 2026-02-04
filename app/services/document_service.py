@@ -10,8 +10,9 @@ from dotenv import load_dotenv
 # 加载环境变量
 load_dotenv()
 
-from langchain_text_splitters import SentenceTransformersTokenTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
+from transformers import AutoTokenizer
 # 导入Chroma - 优先使用新的langchain-chroma包
 try:
     from langchain_chroma import Chroma  # type: ignore
@@ -37,14 +38,16 @@ class DocumentService:
         # 延迟初始化嵌入模型和文本分割器，仅在需要时才加载
         self._embeddings = None
         self._text_splitter = None
+        self._tokenizer = None
         
         # 从环境变量获取模型路径
         self.model_path = os.getenv('MODEL_PATH', 'BAAI/bge-small-zh-v1.5')
         
-        # 设置离线模式
+        # 设置离线模式和关闭分词器并行警告
         if os.getenv('HF_HUB_OFFLINE') == '1':
             os.environ['HF_HUB_OFFLINE'] = '1'
             os.environ['TRANSFORMERS_OFFLINE'] = '1'
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
         
         # 向量数据库存储路径
         self.persist_directory = "./chroma_db"
@@ -75,23 +78,40 @@ class DocumentService:
         return self._embeddings
     
     @property
+    def tokenizer(self):
+        """懒加载 bge 原生分词器"""
+        if self._tokenizer is None:
+            print(f"正在加载 bge 分词器: {self.model_path}")
+            try:
+                if os.path.exists(self.model_path):
+                    self._tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+                else:
+                    print(f"警告: 本地模型路径不存在 ({self.model_path})，将尝试从 Hugging Face 下载")
+                    self._tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-small-zh-v1.5")
+                print("✓ 分词器加载成功")
+            except Exception as e:
+                raise Exception(f"分词器加载失败：{str(e)}")
+        return self._tokenizer
+    
+    def _bge_tokenizer(self, text: str) -> List[int]:
+        """适配 bge-small-zh-v1.5 的 tokens 计算函数（与 LangChain 兼容）"""
+        return self.tokenizer.encode(text, add_special_tokens=False)
+    
+    @property
     def text_splitter(self):
-        """懒加载文本分割器"""
+        """懒加载文本分割器 - 使用语义感知的递归字符切分"""
         if self._text_splitter is None:
-            print("正在初始化文本分割器...")
-            # 文本分割器使用本地模型路径
-            if os.path.exists(self.model_path):
-                self._text_splitter = SentenceTransformersTokenTextSplitter(
-                    model_name=self.model_path,
-                    tokens_per_chunk=512,    # 每个切片512个token
-                    chunk_overlap=64         # 切片之间重叠64个token，保持上下文连贯
-                )
-            else:
-                self._text_splitter = SentenceTransformersTokenTextSplitter(
-                    model_name="BAAI/bge-small-zh-v1.5",
-                    tokens_per_chunk=512,
-                    chunk_overlap=64
-                )
+            print("正在初始化语义感知文本分割器...")
+            # RecursiveCharacterTextSplitter：按"强边界→弱边界"递归切分，完美适配中文
+            self._text_splitter = RecursiveCharacterTextSplitter(
+                # 自定义中文语义边界（优先级从高到低）
+                separators=["\n\n", "\n", "。", "！", "？", "；", "，", "、"],  # 空行→换行→句末标点→停顿标点
+                chunk_size=480,           # 单块最大 tokens（适配 bge，预留冗余）
+                chunk_overlap=80,         # 重叠窗口（16.7%，符合 10%-20% 建议值）
+                # 使用 bge 原生分词器计算长度，保证与模型编码一致
+                length_function=lambda x: len(self._bge_tokenizer(x)),
+            )
+            print("✓ 语义感知文本分割器初始化成功 (chunk_size=480, overlap=80)")
         return self._text_splitter
     
     def load_document(self, file_path: str) -> List[Document]:
@@ -169,7 +189,7 @@ class DocumentService:
             chunks = self.split_documents(documents)
             print(f"文档已切分为 {len(chunks)} 个片段")
             
-            # 3. 向量化并存储到Chroma
+            # 3. 向量化并存储到Chroma（追加模式）
             print(f"正在向量化并存储到集合：{collection_name}")
             vectorstore = Chroma.from_documents(
                 documents=chunks,
@@ -180,11 +200,22 @@ class DocumentService:
             
             # 注意：Chroma 0.4.x以上版本会自动持久化，无需手动调用
             
-            # 4. 清理临时文件（可选）
+            # 4. 验证存储的实际数量
+            try:
+                import chromadb
+                client = chromadb.PersistentClient(path=self.persist_directory)
+                collection = client.get_collection(collection_name)
+                actual_count = collection.count()
+                print(f"✓ 实际存储片段数：{actual_count}")
+            except Exception as e:
+                print(f"警告：无法验证实际数量：{str(e)}")
+                actual_count = len(chunks)
+            
+            # 5. 清理临时文件（可选）
             # os.remove(file_path)
             
             return {
-                "chunks_count": len(chunks),
+                "chunks_count": actual_count,  # 返回实际存储的数量
                 "collection_name": collection_name,
                 "status": "success"
             }
@@ -262,6 +293,7 @@ class DocumentService:
                 chunks = []
                 documents = collection_data.get('documents', [])
                 metadatas = collection_data.get('metadatas', [])
+                ids = collection_data.get('ids', [])
                 
                 # 应用偏移量和限制
                 start_idx = offset
@@ -269,10 +301,12 @@ class DocumentService:
                 
                 for i in range(start_idx, end_idx):
                     chunk_info = {
-                        "id": i + 1,
+                        "id": ids[i] if i < len(ids) else str(i + 1),
                         "content": documents[i] if i < len(documents) else "",
                         "metadata": metadatas[i] if i < len(metadatas) else {},
-                        "content_length": len(documents[i]) if i < len(documents) else 0
+                        "content_length": len(documents[i]) if i < len(documents) else 0,
+                        # 添加文件名信息（如果存在）
+                        "source": metadatas[i].get('source', '未知') if i < len(metadatas) else '未知'
                     }
                     chunks.append(chunk_info)
                 
@@ -295,3 +329,48 @@ class DocumentService:
                 
         except Exception as e:
             raise Exception(f"获取文档片段失败：{str(e)}")
+    
+    def get_documents_list(self, collection_name: str = "default") -> Dict:
+        """
+        获取集合中所有文档的列表（按文件名分组）
+        
+        Args:
+            collection_name: 集合名称
+            
+        Returns:
+            文档列表信息
+        """
+        try:
+            vectorstore = self.get_vectorstore(collection_name)
+            collection_data = vectorstore.get()
+            
+            metadatas = collection_data.get('metadatas', [])
+            
+            # 按文件名统计片段数
+            documents_dict = {}
+            for metadata in metadatas:
+                source = metadata.get('source', '未知文档')
+                if source in documents_dict:
+                    documents_dict[source] += 1
+                else:
+                    documents_dict[source] = 1
+            
+            # 转换为列表格式
+            documents_list = [
+                {
+                    "filename": filename,
+                    "chunks_count": count,
+                    "source_path": filename
+                }
+                for filename, count in documents_dict.items()
+            ]
+            
+            return {
+                "collection_name": collection_name,
+                "total_documents": len(documents_list),
+                "total_chunks": len(metadatas),
+                "documents": documents_list
+            }
+            
+        except Exception as e:
+            raise Exception(f"获取文档列表失败：{str(e)}")
