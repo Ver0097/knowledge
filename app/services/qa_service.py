@@ -73,39 +73,85 @@ class QAService:
             return None
         
         try:
-            # 自定义混合检索器实现（替代 EnsembleRetriever）
+            # 自定义混合检索器实现（使用 RRF 算法替代 EnsembleRetriever）
             class HybridRetriever:
-                """混合检索器：融合多个检索器的结果"""
-                def __init__(self, retrievers, weights=None):
+                """
+                混合检索器：使用 Reciprocal Rank Fusion (RRF) 算法融合多个检索器的结果
+                
+                RRF 算法原理：
+                - 对每个检索器返回的文档列表，根据其排名位置计算倒数排名分数
+                - 公式：score = 1 / (rank + k)，其中 k 是平滑常数（默认60）
+                - 将所有检索器对同一文档的分数相加，得到最终融合分数
+                - 按融合分数降序排列，返回去重后的文档列表
+                
+                优势：
+                - 无需手动调整权重参数
+                - 对不同检索器的评分尺度不敏感
+                - 能有效平衡多个检索源的贡献
+                """
+                def __init__(self, retrievers, k=60):
+                    """
+                    初始化混合检索器
+                    
+                    Args:
+                        retrievers: 检索器列表，如 [vector_retriever, bm25_retriever]
+                        k: RRF 平滑常数，默认 60（论文推荐值）
+                           - k 值越大，排名靠后的文档分数衰减越慢
+                           - k 值越小，更偏重排名靠前的文档
+                    """
                     self.retrievers = retrievers
-                    self.weights = weights or [1.0 / len(retrievers)] * len(retrievers)
-                    if len(self.retrievers) != len(self.weights):
-                        raise ValueError("检索器数量与权重数量不匹配")
+                    self.k = k
                 
                 def invoke(self, query: str):
-                    """执行混合检索"""
-                    all_docs = []
-                    doc_scores = {}
+                    """
+                    执行 RRF 混合检索
                     
-                    # 从所有检索器获取文档
-                    for retriever, weight in zip(self.retrievers, self.weights):
+                    Args:
+                        query: 查询字符串
+                        
+                    Returns:
+                        融合后的文档列表（已去重并按 RRF 分数排序）
+                    """
+                    # 存储融合分数：{文档内容: RRF分数}
+                    fused_scores = {}
+                    # 存储文档对象：{文档内容: Document对象}
+                    doc_map = {}
+                    
+                    # 从所有检索器获取文档并计算 RRF 分数
+                    for retriever in self.retrievers:
                         try:
+                            # 调用检索器获取文档列表
                             docs = retriever.invoke(query)
-                            for i, doc in enumerate(docs):
-                                # 使用文档内容作为唯一标识
-                                doc_id = doc.page_content
-                                # 计算分数：排名越前分数越高
-                                score = weight * (1.0 / (i + 1))
-                                if doc_id in doc_scores:
-                                    doc_scores[doc_id]['score'] += score
-                                else:
-                                    doc_scores[doc_id] = {'doc': doc, 'score': score}
+                            
+                            # 遍历文档，根据排名计算 RRF 分数
+                            for rank, doc in enumerate(docs):
+                                # 使用文档内容作为唯一键（去重依据）
+                                # 注意：实际生产环境建议使用文档ID，但当前使用内容哈希
+                                doc_key = doc.page_content
+                                
+                                # RRF 核心公式：score = 1 / (rank + k)
+                                # rank 从 0 开始，所以实际是 1/(0+60), 1/(1+60), 1/(2+60)...
+                                rrf_score = 1.0 / (rank + self.k)
+                                
+                                # 累加来自不同检索器的分数（同一文档可能被多个检索器返回）
+                                if doc_key not in fused_scores:
+                                    fused_scores[doc_key] = 0.0
+                                    doc_map[doc_key] = doc
+                                fused_scores[doc_key] += rrf_score
+                                
                         except Exception as e:
-                            print(f"检索器执行失败: {str(e)}")
+                            print(f"[WARN] 检索器执行失败: {str(e)}")
+                            continue
                     
-                    # 按分数排序并返回文档
-                    sorted_docs = sorted(doc_scores.values(), key=lambda x: x['score'], reverse=True)
-                    return [item['doc'] for item in sorted_docs]
+                    # 按 RRF 融合分数降序排序
+                    sorted_items = sorted(
+                        fused_scores.items(), 
+                        key=lambda x: x[1],  # 按分数排序
+                        reverse=True  # 降序
+                    )
+                    
+                    # 返回去重后的文档列表
+                    return [doc_map[doc_key] for doc_key, score in sorted_items]
 
             from langchain_core.runnables import RunnablePassthrough, RunnableLambda
             from langchain_core.prompts import ChatPromptTemplate
@@ -117,14 +163,15 @@ class QAService:
             collection_name = vectorstore._collection_name
             bm25_retriever = self.document_service.get_bm25_retriever(collection_name, k=5)
             
-            # 3. 构建混合检索器 (Hybrid)
+            # 3. 构建混合检索器 (Hybrid with RRF)
             if bm25_retriever:
-                # 权重分配：向量检索 0.7, 关键词检索 0.3
+                # 使用 RRF 算法融合向量检索和 BM25 检索
+                # k=60 是 RRF 论文推荐的默认值
                 hybrid_retriever = HybridRetriever(
                     retrievers=[vector_retriever, bm25_retriever],
-                    weights=[0.7, 0.3]
+                    k=60
                 )
-                print("✓ 混合检索器 (向量 + BM25) 已启用")
+                print("✓ 混合检索器 (向量 + BM25 + RRF) 已启用")
             else:
                 hybrid_retriever = vector_retriever
                 print("[INFO] 使用纯向量检索")
@@ -277,38 +324,42 @@ class QAService:
             vector_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
             bm25_retriever = self.document_service.get_bm25_retriever(collection_name, k=5)
             
-            # 自定义混合检索器实现
+            # 自定义混合检索器实现（RRF 算法）
             class HybridRetriever:
-                """混合检索器：融合多个检索器的结果"""
-                def __init__(self, retrievers, weights=None):
+                """
+                混合检索器：使用 Reciprocal Rank Fusion (RRF) 算法融合多个检索器的结果
+                RRF 公式：score = 1 / (rank + k)，k默认60
+                """
+                def __init__(self, retrievers, k=60):
                     self.retrievers = retrievers
-                    self.weights = weights or [1.0 / len(retrievers)] * len(retrievers)
+                    self.k = k
                 
                 def invoke(self, query: str):
-                    """执行混合检索"""
-                    all_docs = []
-                    doc_scores = {}
+                    """执行 RRF 混合检索"""
+                    fused_scores = {}
+                    doc_map = {}
                     
-                    for retriever, weight in zip(self.retrievers, self.weights):
+                    for retriever in self.retrievers:
                         try:
                             docs = retriever.invoke(query)
-                            for i, doc in enumerate(docs):
-                                doc_id = doc.page_content
-                                score = weight * (1.0 / (i + 1))
-                                if doc_id in doc_scores:
-                                    doc_scores[doc_id]['score'] += score
-                                else:
-                                    doc_scores[doc_id] = {'doc': doc, 'score': score}
+                            for rank, doc in enumerate(docs):
+                                doc_key = doc.page_content
+                                rrf_score = 1.0 / (rank + self.k)
+                                if doc_key not in fused_scores:
+                                    fused_scores[doc_key] = 0.0
+                                    doc_map[doc_key] = doc
+                                fused_scores[doc_key] += rrf_score
                         except Exception as e:
-                            print(f"检索器执行失败: {str(e)}")
+                            print(f"[WARN] 检索器执行失败: {str(e)}")
+                            continue
                     
-                    sorted_docs = sorted(doc_scores.values(), key=lambda x: x['score'], reverse=True)
-                    return [item['doc'] for item in sorted_docs]
+                    sorted_items = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
+                    return [doc_map[doc_key] for doc_key, score in sorted_items]
 
             if bm25_retriever:
                 retriever = HybridRetriever(
                     retrievers=[vector_retriever, bm25_retriever],
-                    weights=[0.7, 0.3]
+                    k=60  # RRF 平滑常数
                 )
             else:
                 retriever = vector_retriever
