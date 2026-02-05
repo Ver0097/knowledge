@@ -22,6 +22,10 @@ class QAService:
         """初始化问答服务"""
         self.document_service = DocumentService()
         
+        # 初始化 Reranker 模型 (懒加载)
+        self._reranker = None
+        self.reranker_model_path = os.getenv("RERANKER_MODEL_PATH", "BAAI/bge-reranker-base")
+        
         # 初始化LLM
         # 优先使用DeepSeek API，如果未配置则使用基于检索的简化问答
         self.llm = None
@@ -56,37 +60,90 @@ class QAService:
     
     def create_qa_chain(self, vectorstore, llm=None):
         """
-        创建问答链
+        创建问答链（支持混合检索和 Rerank）
         
         Args:
             vectorstore: 向量数据库实例
             llm: 语言模型实例（可选）
             
         Returns:
-            RetrievalQA链实例（如果有LLM）或None
+            QAChainWrapper 实例
         """
         if not llm:
             return None
         
         try:
-            # LangChain 1.x 版本使用 Runnable 接口手动构建检索链
+            # 自定义混合检索器实现（替代 EnsembleRetriever）
+            class HybridRetriever:
+                """混合检索器：融合多个检索器的结果"""
+                def __init__(self, retrievers, weights=None):
+                    self.retrievers = retrievers
+                    self.weights = weights or [1.0 / len(retrievers)] * len(retrievers)
+                    if len(self.retrievers) != len(self.weights):
+                        raise ValueError("检索器数量与权重数量不匹配")
+                
+                def invoke(self, query: str):
+                    """执行混合检索"""
+                    all_docs = []
+                    doc_scores = {}
+                    
+                    # 从所有检索器获取文档
+                    for retriever, weight in zip(self.retrievers, self.weights):
+                        try:
+                            docs = retriever.invoke(query)
+                            for i, doc in enumerate(docs):
+                                # 使用文档内容作为唯一标识
+                                doc_id = doc.page_content
+                                # 计算分数：排名越前分数越高
+                                score = weight * (1.0 / (i + 1))
+                                if doc_id in doc_scores:
+                                    doc_scores[doc_id]['score'] += score
+                                else:
+                                    doc_scores[doc_id] = {'doc': doc, 'score': score}
+                        except Exception as e:
+                            print(f"检索器执行失败: {str(e)}")
+                    
+                    # 按分数排序并返回文档
+                    sorted_docs = sorted(doc_scores.values(), key=lambda x: x['score'], reverse=True)
+                    return [item['doc'] for item in sorted_docs]
+
             from langchain_core.runnables import RunnablePassthrough, RunnableLambda
             from langchain_core.prompts import ChatPromptTemplate
             
-            # 创建检索器
-            retriever = vectorstore.as_retriever(
-                search_kwargs={"k": 3}  # 检索前3个最相关的文档片段
-            )
+            # 1. 向量检索器
+            vector_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
             
-            # 自定义提示词模板（中文优化）
-            prompt_template = """基于以下上下文信息回答问题。如果你不知道答案，就说不知道，不要编造答案。
+            # 2. 关键词检索器 (BM25)
+            collection_name = vectorstore._collection_name
+            bm25_retriever = self.document_service.get_bm25_retriever(collection_name, k=5)
+            
+            # 3. 构建混合检索器 (Hybrid)
+            if bm25_retriever:
+                # 权重分配：向量检索 0.7, 关键词检索 0.3
+                hybrid_retriever = HybridRetriever(
+                    retrievers=[vector_retriever, bm25_retriever],
+                    weights=[0.7, 0.3]
+                )
+                print("✓ 混合检索器 (向量 + BM25) 已启用")
+            else:
+                hybrid_retriever = vector_retriever
+                print("[INFO] 使用纯向量检索")
+            
+            # 自定义提示词模板 (增强容错性和格式化要求)
+            prompt_template = """你是一个专业的知识库助手。请根据提供的上下文信息，简洁、准确地回答用户的问题。
 
-上下文信息：
+### 规则：
+1. **仅根据上下文回答**：如果上下文中没有提到相关信息，请诚实告知，不要胡编乱造。
+2. **结构化回答**：如果步骤较多，请使用列表形式（如 1. 2. 3.）。
+3. **语言处理**：上下文可能包含一些由于解析产生的异常空格（如“中 文”），请在理解时自动忽略这些空格，并以正常的中文格式回答。
+
+### 上下文信息：
 {context}
 
-问题：{question}
+### 问题：
+{question}
 
-请用中文回答："""
+### 助手回答："""
             
             # 使用 ChatPromptTemplate（兼容 ChatOpenAI）
             prompt = ChatPromptTemplate.from_template(prompt_template)
@@ -96,20 +153,15 @@ class QAService:
                 return "\n\n".join(doc.page_content for doc in docs)
             
             # 构建检索链：检索文档 -> 格式化 -> 生成答案
-            qa_chain = (
-                {
-                    "context": retriever | RunnableLambda(format_docs),
-                    "question": RunnablePassthrough()
-                }
-                | prompt
-                | llm
-            )
+            # 基础链：输入 {"context": "...", "question": "..."} -> 输出 LLM 响应
+            llm_chain = prompt | llm
             
             # 包装为统一的接口，使其返回包含 "answer" 和 "context" 的字典
             class QAChainWrapper:
-                def __init__(self, chain, retriever):
-                    self.chain = chain
+                def __init__(self, llm_chain, retriever, rerank_func=None):
+                    self.llm_chain = llm_chain
                     self.retriever = retriever
+                    self.rerank_func = rerank_func
                 
                 def invoke(self, input_data):
                     # 从输入中提取问题
@@ -120,29 +172,88 @@ class QAService:
                     else:
                         question = str(input_data)
                     
-                    # 检索文档
+                    # 1. 检索候选文档
                     docs = self.retriever.invoke(question)
                     
-                    # 使用链生成答案
-                    result = self.chain.invoke(question)
+                    # 2. 如果有重排序函数，进行重排序
+                    if self.rerank_func:
+                        docs = self.rerank_func(question, docs, top_n=3)
+                    
+                    # 2.5 文本清洗 (解决存量数据的空格问题)
+                    cleaned_docs = []
+                    import re
+                    for doc in docs:
+                        content = doc.page_content
+                        # 移除中文字符间的异常空格
+                        content = re.sub(r'([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])', r'\1\2', content)
+                        content = re.sub(r'([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])', r'\1\2', content)
+                        doc.page_content = content
+                        cleaned_docs.append(doc)
+                    
+                    # 3. 使用 LLM 生成答案
+                    context_text = "\n\n".join(doc.page_content for doc in cleaned_docs)
+                    result = self.llm_chain.invoke({"context": context_text, "question": question})
                     
                     # 提取答案内容
                     answer = result.content if hasattr(result, 'content') else str(result)
                     
-                    # 返回统一格式（兼容旧版本）
+                    # 返回统一格式
                     return {
                         "answer": answer,
                         "context": docs,
-                        "result": answer  # 兼容旧版本的字段名
+                        "result": answer
                     }
             
-            return QAChainWrapper(qa_chain, retriever)
+            return QAChainWrapper(llm_chain, hybrid_retriever, self._rerank_documents)
         except Exception as e:
             print(f"创建问答链失败：{str(e)}")
             import traceback
             traceback.print_exc()
             return None
     
+    @property
+    def reranker(self):
+        """懒加载 Reranker 模型"""
+        if self._reranker is None:
+            try:
+                from sentence_transformers import CrossEncoder
+                print(f"正在加载 Reranker 模型: {self.reranker_model_path}")
+                
+                # 检查本地路径
+                model_path = self.reranker_model_path
+                if not os.path.exists(model_path):
+                    print(f"警告: 本地 Reranker 路径不存在，将尝试在线下载: {model_path}")
+                    # 如果不存在且不是绝对路径，可能需要下载
+                
+                self._reranker = CrossEncoder(model_path, device='cpu')
+                print("✓ Reranker 模型加载成功")
+            except Exception as e:
+                print(f"[WARN] Reranker 加载失败: {str(e)}，将跳过重排序步骤")
+                self._reranker = False # 标记为加载失败，避免重复尝试
+        return self._reranker
+
+    def _rerank_documents(self, query: str, docs: List, top_n: int = 3) -> List:
+        """使用 Reranker 对文档进行重排序"""
+        if not docs or not self.reranker:
+            return docs[:top_n]
+            
+        try:
+            # 准备输入对：(query, content)
+            pairs = [[query, doc.page_content] for doc in docs]
+            # 计算分数
+            scores = self.reranker.predict(pairs)
+            
+            # 将分数添加到文档元数据中并排序
+            for doc, score in zip(docs, scores):
+                doc.metadata["rerank_score"] = float(score)
+            
+            # 按分数降序排列
+            reranked_docs = sorted(docs, key=lambda x: x.metadata["rerank_score"], reverse=True)
+            return reranked_docs[:top_n]
+        except Exception as e:
+            print(f"重排序失败: {str(e)}")
+            return docs[:top_n]
+
     async def answer_question(
         self, 
         question: str, 
@@ -162,29 +273,65 @@ class QAService:
             # 获取向量数据库
             vectorstore = self.document_service.get_vectorstore(collection_name)
             
-            # 检索相关文档（新版本LangChain使用invoke方法）
-            retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-            # 新版本使用invoke方法替代get_relevant_documents
-            try:
-                # 尝试使用新版本的invoke方法
-                relevant_docs = retriever.invoke(question)
-            except AttributeError:
-                # 如果失败，尝试旧版本的get_relevant_documents方法
-                try:
-                    relevant_docs = retriever.get_relevant_documents(question)
-                except Exception as e:
-                    print(f"[ERROR] 检索文档失败：{str(e)}")
-                    return {
-                        "answer": "抱歉，检索文档时出错，请稍后重试。",
-                        "sources": []
-                    }
-            except Exception as e:
-                print(f"[ERROR] 检索文档失败：{str(e)}")
-                return {
-                    "answer": "抱歉，检索文档时出错，请稍后重试。",
-                    "sources": []
-                }
+            # 1. 构建混合检索器 (向量 + BM25)
+            vector_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+            bm25_retriever = self.document_service.get_bm25_retriever(collection_name, k=5)
             
+            # 自定义混合检索器实现
+            class HybridRetriever:
+                """混合检索器：融合多个检索器的结果"""
+                def __init__(self, retrievers, weights=None):
+                    self.retrievers = retrievers
+                    self.weights = weights or [1.0 / len(retrievers)] * len(retrievers)
+                
+                def invoke(self, query: str):
+                    """执行混合检索"""
+                    all_docs = []
+                    doc_scores = {}
+                    
+                    for retriever, weight in zip(self.retrievers, self.weights):
+                        try:
+                            docs = retriever.invoke(query)
+                            for i, doc in enumerate(docs):
+                                doc_id = doc.page_content
+                                score = weight * (1.0 / (i + 1))
+                                if doc_id in doc_scores:
+                                    doc_scores[doc_id]['score'] += score
+                                else:
+                                    doc_scores[doc_id] = {'doc': doc, 'score': score}
+                        except Exception as e:
+                            print(f"检索器执行失败: {str(e)}")
+                    
+                    sorted_docs = sorted(doc_scores.values(), key=lambda x: x['score'], reverse=True)
+                    return [item['doc'] for item in sorted_docs]
+
+            if bm25_retriever:
+                retriever = HybridRetriever(
+                    retrievers=[vector_retriever, bm25_retriever],
+                    weights=[0.7, 0.3]
+                )
+            else:
+                retriever = vector_retriever
+                
+            # 2. 检索相关文档候选集
+            try:
+                candidate_docs = retriever.invoke(question)
+            except Exception as e:
+                print(f"[ERROR] 检索候选文档失败：{str(e)}")
+                # 降级到纯向量检索
+                candidate_docs = vector_retriever.invoke(question)
+            
+            # 3. Rerank 重排序
+            relevant_docs = self._rerank_documents(question, candidate_docs, top_n=3)
+            
+            # 3.5 实时清洗检索到的片段 (应对历史存量数据)
+            import re
+            for doc in relevant_docs:
+                content = doc.page_content
+                content = re.sub(r'([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])', r'\1\2', content)
+                content = re.sub(r'([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])', r'\1\2', content)
+                doc.page_content = content
+
             if not relevant_docs:
                 return {
                     "answer": "抱歉，在知识库中没有找到相关信息。",
@@ -248,6 +395,9 @@ class QAService:
             else:
                 # 简化版：直接返回最相关的文档片段
                 answer = self._format_retrieval_answer(relevant_docs)
+                # 如果是因为没有配置 LLM，在回答开头加上提示
+                if not self.llm:
+                    answer = "【提示：未配置 LLM (DeepSeek)，当前为纯检索模式】\n\n" + answer
                 sources = [
                     doc.metadata.get("source", "未知来源") 
                     for doc in relevant_docs

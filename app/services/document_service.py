@@ -142,11 +142,36 @@ class DocumentService:
             else:
                 raise ValueError(f"不支持的文件格式：{file_ext}")
             
-            return documents
+            # 对加载后的文档进行文本清洗
+            return self._clean_documents(documents)
         
         except Exception as e:
             raise Exception(f"加载文档失败：{str(e)}")
     
+    def _clean_documents(self, documents: List[Document]) -> List[Document]:
+        """清洗文档内容，处理 PDF 解析产生的异常空格等问题"""
+        import re
+        for doc in documents:
+            content = doc.page_content
+            
+            # 1. 修复中文字符间的异常空格 (e.g., "中 文" -> "中文")
+            # 匹配两个中文字符之间的一个空格，并将其删除
+            # 使用 Unicode 范围匹配中文字符
+            content = re.sub(r'([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])', r'\1\2', content)
+            # 递归处理多次出现的空格
+            content = re.sub(r'([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])', r'\1\2', content)
+            
+            # 2. 修复中英文/数字之间的多余空格
+            content = re.sub(r'([\u4e00-\u9fa5])\s+([a-zA-Z0-9])', r'\1\2', content)
+            content = re.sub(r'([a-zA-Z0-9])\s+([\u4e00-\u9fa5])', r'\1\2', content)
+            
+            # 3. 清理多余的换行和空白符
+            content = re.sub(r'\n{3,}', '\n\n', content)
+            content = content.strip()
+            
+            doc.page_content = content
+        return documents
+
     def split_documents(self, documents: List[Document]) -> List[Document]:
         """
         将文档切分成小块
@@ -268,6 +293,51 @@ class DocumentService:
             embedding_function=self.embeddings,
             collection_name=collection_name
         )
+    
+    def get_bm25_retriever(self, collection_name: str = "default", k: int = 3):
+        """
+        从 Chroma 中获取文档并初始化 BM25 检索器
+        
+        Args:
+            collection_name: 集合名称
+            k: 检索结果数量
+            
+        Returns:
+            BM25Retriever 实例
+        """
+        try:
+            from langchain_community.retrievers import BM25Retriever
+            
+            vectorstore = self.get_vectorstore(collection_name)
+            # 获取所有文档内容用于构建 BM25 索引
+            # 注意：对于超大规模知识库，建议使用持久化的关键词检索引擎如 Elasticsearch
+            collection_data = vectorstore.get()
+            documents = collection_data.get('documents', [])
+            metadatas = collection_data.get('metadatas', [])
+            
+            if not documents:
+                return None
+                
+            # 转换为 Document 对象列表
+            docs = [
+                Document(page_content=content, metadata=metadata)
+                for content, metadata in zip(documents, metadatas)
+            ]
+            
+            # 使用 jieba 进行中文分词以优化 BM25 效果
+            import jieba
+            def jieba_tokenizer(text):
+                return list(jieba.cut(text))
+                
+            retriever = BM25Retriever.from_documents(
+                docs, 
+                preprocess_func=jieba_tokenizer
+            )
+            retriever.k = k
+            return retriever
+        except Exception as e:
+            print(f"初始化 BM25 检索器失败：{str(e)}")
+            return None
     
     def get_document_chunks(self, collection_name: str = "default", limit: int = 10, offset: int = 0):
         """
