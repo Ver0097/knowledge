@@ -38,10 +38,11 @@ class DocumentService:
         # 延迟初始化嵌入模型和文本分割器，仅在需要时才加载
         self._embeddings = None
         self._text_splitter = None
+
         self._tokenizer = None
         
-        # 从环境变量获取模型路径
-        self.model_path = os.getenv('MODEL_PATH', 'BAAI/bge-small-zh-v1.5')
+        # 从环境变量获取模型路径，默认使用BGE-M3
+        self.model_path = os.getenv('MODEL_PATH', 'BAAI/bge-m3')
         
         # 设置离线模式和关闭分词器并行警告
         if os.getenv('HF_HUB_OFFLINE') == '1':
@@ -60,11 +61,13 @@ class DocumentService:
             print(f"正在从本地路径加载嵌入模型: {self.model_path}")
             
             # 检查模型路径是否存在
+            model_kwargs = {'device': 'cpu', 'trust_remote_code': True}
+                            
             if os.path.exists(self.model_path):
                 # 使用本地模型路径
                 self._embeddings = HuggingFaceEmbeddings(
                     model_name=self.model_path,
-                    model_kwargs={'device': 'cpu'},  # 如果有GPU可改为'cuda'
+                    model_kwargs=model_kwargs,  # 如果有GPU可改为'cuda'
                     encode_kwargs={'normalize_embeddings': True}  # 归一化嵌入向量
                 )
                 print("✓ 本地模型加载成功")
@@ -72,30 +75,38 @@ class DocumentService:
                 # 回退到在线下载模式
                 print(f"警告: 本地模型路径不存在 ({self.model_path})，将尝试从 Hugging Face 下载")
                 self._embeddings = HuggingFaceEmbeddings(
-                    model_name="BAAI/bge-small-zh-v1.5",
-                    model_kwargs={'device': 'cpu'}
+                    model_name="BAAI/bge-m3",
+                    model_kwargs=model_kwargs
                 )
         return self._embeddings
     
     @property
     def tokenizer(self):
-        """懒加载 bge 原生分词器"""
+        """仅加载 BGE-M3 分词器（轻量，无需加载模型权重）"""
         if self._tokenizer is None:
-            print(f"正在加载 bge 分词器: {self.model_path}")
+            print(f"正在加载 BGE-M3 分词器: {self.model_path}")
             try:
+                from transformers import AutoTokenizer
                 if os.path.exists(self.model_path):
-                    self._tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+                    self._tokenizer = AutoTokenizer.from_pretrained(
+                        self.model_path,
+                        trust_remote_code=True,  # 关键参数
+                        use_fast=False,          # 避免分词器兼容问题
+                        local_files_only=True    # 强制离线模式
+                    )
                 else:
-                    print(f"警告: 本地模型路径不存在 ({self.model_path})，将尝试从 Hugging Face 下载")
-                    self._tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-small-zh-v1.5")
-                print("✓ 分词器加载成功")
+                    raise Exception(f"本地模型路径不存在：{self.model_path}")
+                print("✓ BGE-M3 分词器加载成功")
             except Exception as e:
                 raise Exception(f"分词器加载失败：{str(e)}")
         return self._tokenizer
     
-    def _bge_tokenizer(self, text: str) -> List[int]:
-        """适配 bge-small-zh-v1.5 的 tokens 计算函数（与 LangChain 兼容）"""
-        return self.tokenizer.encode(text, add_special_tokens=False)
+    def _bge_tokenizer(self, text: str) -> int:
+        """
+        适配 BGE-M3 的 tokens 计算函数
+        使用轻量级分词器准确计算 tokens（无需加载完整模型）
+        """
+        return len(self.tokenizer.encode(text, add_special_tokens=False))
     
     @property
     def text_splitter(self):
@@ -106,10 +117,10 @@ class DocumentService:
             self._text_splitter = RecursiveCharacterTextSplitter(
                 # 自定义中文语义边界（优先级从高到低）
                 separators=["\n\n", "\n", "。", "！", "？", "；", "，", "、"],  # 空行→换行→句末标点→停顿标点
-                chunk_size=480,           # 单块最大 tokens（适配 bge，预留冗余）
+                chunk_size=480,           # 单块最大 tokens（适配 BGE-M3，预留冗余）
                 chunk_overlap=80,         # 重叠窗口（16.7%，符合 10%-20% 建议值）
-                # 使用 bge 原生分词器计算长度，保证与模型编码一致
-                length_function=lambda x: len(self._bge_tokenizer(x)),
+                # 使用 BGE-M3 原生分词器计算长度，保证与模型编码一致
+                length_function=self._bge_tokenizer,
             )
             print("✓ 语义感知文本分割器初始化成功 (chunk_size=480, overlap=80)")
         return self._text_splitter

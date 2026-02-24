@@ -28,6 +28,9 @@ transformers>=4.0.0
 torch>=2.0.0
 # Optional: einops is sometimes needed for some BGE models
 einops>=0.7.0
+# Required for BGE-M3 tokenizer (XLMRobertaTokenizer)
+sentencepiece>=0.1.99
+protobuf>=3.20.0
 
 # Utilities
 python-dotenv>=1.0.0

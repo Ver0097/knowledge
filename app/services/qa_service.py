@@ -24,7 +24,7 @@ class QAService:
         
         # 初始化 Reranker 模型 (懒加载)
         self._reranker = None
-        self.reranker_model_path = os.getenv("RERANKER_MODEL_PATH", "BAAI/bge-reranker-base")
+        self.reranker_model_path = os.getenv("RERANKER_MODEL_PATH", "BAAI/bge-reranker-v2-m3")
         
         # 初始化LLM
         # 优先使用DeepSeek API，如果未配置则使用基于检索的简化问答

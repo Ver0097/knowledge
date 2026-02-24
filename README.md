@@ -15,7 +15,7 @@
 - **后端框架**：FastAPI
 - **AI框架**：LangChain
 - **向量数据库**：Chroma
-- **嵌入模型**：BAAI/bge-small-zh-v1.5
+- **嵌入模型**：BAAI/bge-m3
 - **LLM API**：DeepSeek API（与OpenAI API兼容，[文档](https://api-docs.deepseek.com/zh-cn/)）
 - **文档处理**：PyPDF, python-docx
 - **前端**：JSP + HTML + CSS + JavaScript
@@ -45,7 +45,7 @@ pip install -r requirements.txt
 
 ### 4. 下载嵌入模型（首次运行会自动下载）
 
-系统使用 `BAAI/bge-small-zh-v1.5` 模型，首次运行时会自动下载（约 100MB）。
+系统使用 `BAAI/bge-m3` 模型，首次运行时会自动下载（约 2.2GB）。
 
 ### 5. 启动服务
 
@@ -144,10 +144,9 @@ langchain-demo/
 在 `app/services/document_service.py` 中可以调整切片参数：
 
 ```python
-self.text_splitter = SentenceTransformersTokenTextSplitter(
-    model_name="BAAI/bge-small-zh-v1.5",
-    tokens_per_chunk=512,    # 每个切片token数
-    chunk_overlap=64,        # 切片重叠token数
+self.text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=480,          # 每个切片token数
+    chunk_overlap=80,        # 切片重叠token数
 )
 ```
 
