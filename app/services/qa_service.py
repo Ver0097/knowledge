@@ -2,10 +2,11 @@
 问答服务
 基于向量数据库检索和LangChain实现智能问答
 支持DeepSeek API（与OpenAI API兼容）
+支持流式输出
 """
 import os
 import asyncio
-from typing import Dict, List
+from typing import Dict, List, AsyncGenerator
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
 
@@ -17,25 +18,25 @@ load_dotenv()
 
 class QAService:
     """问答服务类"""
-    
+
     def __init__(self):
         """初始化问答服务"""
         self.document_service = DocumentService()
-        
+
         # 初始化 Reranker 模型 (懒加载)
         self._reranker = None
         self.reranker_model_path = os.getenv("RERANKER_MODEL_PATH", "BAAI/bge-reranker-v2-m3")
-        
+
         # 初始化LLM
         # 优先使用DeepSeek API，如果未配置则使用基于检索的简化问答
         self.llm = None
-        
+
         # 尝试初始化DeepSeek API
         deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
         if deepseek_api_key:
             try:
                 from langchain_openai import ChatOpenAI
-                
+
                 # DeepSeek API与OpenAI API兼容，使用ChatOpenAI
                 # 参考文档：https://api-docs.deepseek.com/zh-cn/
                 self.llm = ChatOpenAI(
@@ -46,8 +47,9 @@ class QAService:
                     temperature=0.7,  # 控制回答的随机性
                     timeout=60,  # 设置60秒超时
                     max_retries=2,  # 最大重试次数
+                    streaming=True,  # 启用流式输出
                 )
-                print("[OK] DeepSeek API initialized successfully")
+                print("[OK] DeepSeek API initialized successfully (streaming enabled)")
             except ImportError:
                 print("[WARN] langchain-openai not installed, using retrieval-only mode")
                 print("   Please run: pip install langchain-openai")
@@ -484,3 +486,135 @@ class QAService:
             answer_parts.append(f"\n【片段 {i}】\n{content}")
         
         return "\n".join(answer_parts)
+
+    async def answer_question_stream(
+        self,
+        question: str,
+        collection_name: str = "default"
+    ) -> AsyncGenerator[str, None]:
+        """
+        流式回答用户问题（SSE 格式）
+
+        Args:
+            question: 用户问题
+            collection_name: 知识库集合名称
+
+        Yields:
+            SSE 格式的数据流
+        """
+        try:
+            # 获取向量数据库和检索相关文档
+            vectorstore = self.document_service.get_vectorstore(collection_name)
+
+            # 1. 构建混合检索器
+            vector_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+            bm25_retriever = self.document_service.get_bm25_retriever(collection_name, k=5)
+
+            # RRF 混合检索器
+            class HybridRetriever:
+                def __init__(self, retrievers, k=60):
+                    self.retrievers = retrievers
+                    self.k = k
+
+                def invoke(self, query: str):
+                    fused_scores = {}
+                    doc_map = {}
+                    for retriever in self.retrievers:
+                        try:
+                            docs = retriever.invoke(query)
+                            for rank, doc in enumerate(docs):
+                                doc_key = doc.page_content
+                                rrf_score = 1.0 / (rank + self.k)
+                                if doc_key not in fused_scores:
+                                    fused_scores[doc_key] = 0.0
+                                    doc_map[doc_key] = doc
+                                fused_scores[doc_key] += rrf_score
+                        except Exception:
+                            continue
+                    sorted_items = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
+                    return [doc_map[doc_key] for doc_key, score in sorted_items]
+
+            if bm25_retriever:
+                retriever = HybridRetriever(retrievers=[vector_retriever, bm25_retriever], k=60)
+            else:
+                retriever = vector_retriever
+
+            # 2. 检索并重排序
+            candidate_docs = retriever.invoke(question)
+            relevant_docs = self._rerank_documents(question, candidate_docs, top_n=3)
+
+            # 3. 清洗文档内容
+            import re
+            for doc in relevant_docs:
+                content = doc.page_content
+                content = re.sub(r'([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])', r'\1\2', content)
+                content = re.sub(r'([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])', r'\1\2', content)
+                doc.page_content = content
+
+            if not relevant_docs:
+                yield f"data: {self._encode_sse({'type': 'error', 'content': '抱歉，在知识库中没有找到相关信息。'})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            # 先发送来源信息
+            sources = list(set([
+                doc.metadata.get("source", "未知来源")
+                for doc in relevant_docs if hasattr(doc, 'metadata')
+            ]))
+            yield f"data: {self._encode_sse({'type': 'sources', 'content': sources})}\n\n"
+
+            # 4. 流式生成答案
+            context_text = "\n\n".join(doc.page_content for doc in relevant_docs)
+
+            if self.llm:
+                # 使用流式 LLM
+                prompt_template = """你是一个专业的知识库助手。请根据提供的上下文信息，简洁、准确地回答用户的问题。
+
+### 规则：
+1. **仅根据上下文回答**：如果上下文中没有提到相关信息，请诚实告知，不要胡编乱造。
+2. **结构化回答**：如果步骤较多，请使用列表形式（如 1. 2. 3.）。
+3. **语言处理**：上下文可能包含一些由于解析产生的异常空格（如"中 文"），请在理解时自动忽略这些空格，并以正常的中文格式回答。
+
+### 上下文信息：
+{context}
+
+### 问题：
+{question}
+
+### 助手回答："""
+
+                from langchain_core.prompts import ChatPromptTemplate
+                prompt = ChatPromptTemplate.from_template(prompt_template)
+
+                # 构建流式链
+                chain = prompt | self.llm
+
+                try:
+                    # 流式调用
+                    for chunk in chain.stream({"context": context_text, "question": question}):
+                        if chunk.content:
+                            yield f"data: {self._encode_sse({'type': 'content', 'content': chunk.content})}\n\n"
+
+                    yield "data: [DONE]\n\n"
+
+                except Exception as e:
+                    # 流式失败，回退到检索模式
+                    yield f"data: {self._encode_sse({'type': 'error', 'content': f'LLM生成失败，使用检索模式：{str(e)}'})}\n\n"
+                    fallback_answer = self._format_retrieval_answer(relevant_docs)
+                    yield f"data: {self._encode_sse({'type': 'content', 'content': fallback_answer})}\n\n"
+                    yield "data: [DONE]\n\n"
+            else:
+                # 无 LLM，返回检索结果
+                yield f"data: {self._encode_sse({'type': 'content', 'content': '【提示：未配置 LLM，当前为纯检索模式】'})}\n\n"
+                fallback_answer = self._format_retrieval_answer(relevant_docs)
+                yield f"data: {self._encode_sse({'type': 'content', 'content': fallback_answer})}\n\n"
+                yield "data: [DONE]\n\n"
+
+        except Exception as e:
+            yield f"data: {self._encode_sse({'type': 'error', 'content': f'问答处理失败：{str(e)}'})}\n\n"
+            yield "data: [DONE]\n\n"
+
+    def _encode_sse(self, data: dict) -> str:
+        """将数据编码为 SSE JSON 格式"""
+        import json
+        return json.dumps(data, ensure_ascii=False)

@@ -1,10 +1,12 @@
 """
 FastAPI主应用入口
 提供文档上传、向量化存储和智能问答功能
+支持流式输出
 """
 import sys
 import os
 from pathlib import Path
+import json
 
 # 添加项目根目录到Python路径，确保可以导入app模块
 project_root = Path(__file__).parent.parent
@@ -12,7 +14,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -130,20 +132,47 @@ async def ask_question(request: QuestionRequest):
     try:
         if not request.question or not request.question.strip():
             raise HTTPException(status_code=400, detail="问题不能为空")
-        
+
         # 执行问答
         result = await qa_service.answer_question(
             question=request.question,
             collection_name=request.collection_name
         )
-        
+
         return QuestionResponse(
             answer=result["answer"],
             sources=result["sources"]
         )
-    
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"问答处理出错：{str(e)}")
+
+
+@app.post("/api/ask/stream")
+async def ask_question_stream(request: QuestionRequest):
+    """
+    流式智能问答接口（SSE）
+    实时返回答案内容，提升用户体验
+    """
+    if not request.question or not request.question.strip():
+        raise HTTPException(status_code=400, detail="问题不能为空")
+
+    async def generate():
+        async for chunk in qa_service.answer_question_stream(
+            question=request.question,
+            collection_name=request.collection_name
+        ):
+            yield chunk
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream; charset=utf-8",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 @app.get("/api/collections")
