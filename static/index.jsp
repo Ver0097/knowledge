@@ -549,6 +549,9 @@
             padding: 20px 40px;
             background: #ffffff;
             border-top: 1px solid #e5e5e5;
+            position: sticky;
+            bottom: 0;
+            z-index: 10;
         }
 
         .input-wrapper {
