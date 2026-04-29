@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>智能知识库问答系统</title>
+    <!-- Markdown 渲染库 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -643,6 +645,74 @@
             40% { opacity: 1; }
         }
 
+        .streaming-text {
+            white-space: pre-wrap; /* 保持换行格式 */
+        }
+
+        /* Markdown 内容样式 */
+        .markdown-content {
+            line-height: 1.7;
+        }
+
+        .markdown-content p {
+            margin: 0.5em 0;
+        }
+
+        .markdown-content p:first-child {
+            margin-top: 0;
+        }
+
+        .markdown-content p:last-child {
+            margin-bottom: 0;
+        }
+
+        .markdown-content ul, .markdown-content ol {
+            margin: 0.5em 0;
+            padding-left: 1.5em;
+        }
+
+        .markdown-content li {
+            margin: 0.25em 0;
+        }
+
+        .markdown-content strong {
+            color: #1a1a2e;
+            font-weight: 600;
+        }
+
+        .markdown-content code {
+            background: rgba(102,126,234,0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+        }
+
+        .markdown-content pre {
+            background: #f8f9fa;
+            padding: 12px 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 0.5em 0;
+        }
+
+        .markdown-content pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .markdown-content h1, .markdown-content h2, .markdown-content h3 {
+            margin: 0.8em 0 0.4em;
+            color: #1a1a2e;
+        }
+
+        .markdown-content blockquote {
+            border-left: 3px solid #667eea;
+            padding-left: 1em;
+            margin: 0.5em 0;
+            color: #666;
+        }
+
         /* ===== 移动端适配 ===== */
         .sidebar-toggle {
             display: none;
@@ -979,6 +1049,7 @@
         let currentAiMessage = null;
         let currentSources = null;
         let hasStartedStreaming = false; // 标记是否已开始显示内容
+        let streamingMarkdownText = ''; // 保存流式输出的原始 Markdown 文本
 
         function addMessage(role, content, sources = null) {
             // 隐藏欢迎消息
@@ -1052,12 +1123,35 @@
         }
 
         function updateStreamingContent(text) {
-            // 直接追加到当前消息
+            // 追加原始 Markdown 文本
+            streamingMarkdownText += text;
+
+            // 流式过程中显示纯文本（避免不完整 Markdown 导致格式错乱）
             const contentEl = document.getElementById('streamingContent');
             if (contentEl) {
                 const textSpan = contentEl.querySelector('.streaming-text');
                 if (textSpan) {
-                    textSpan.textContent += text;
+                    // 流式显示纯文本，保持原始换行
+                    textSpan.textContent = streamingMarkdownText;
+                }
+                scrollToBottom();
+            }
+        }
+
+        function renderFinalMarkdown() {
+            // 流式结束后，渲染完整的 Markdown
+            const contentEl = document.getElementById('streamingContent');
+            if (contentEl) {
+                const textSpan = contentEl.querySelector('.streaming-text');
+                if (textSpan && streamingMarkdownText) {
+                    try {
+                        // 最终渲染 Markdown 为 HTML
+                        textSpan.innerHTML = marked.parse(streamingMarkdownText);
+                        textSpan.classList.add('markdown-content');
+                    } catch (e) {
+                        // 渲染失败，保持纯文本
+                        console.warn('Markdown render error:', e);
+                    }
                 }
                 scrollToBottom();
             }
@@ -1075,6 +1169,9 @@
         }
 
         function finalizeStream() {
+            // 渲染最终的 Markdown 格式
+            renderFinalMarkdown();
+
             // 清理 id，防止重复
             const contentEl = document.getElementById('streamingContent');
             if (contentEl) {
@@ -1125,6 +1222,7 @@
 
             // 重置流式状态
             hasStartedStreaming = false;
+            streamingMarkdownText = ''; // 重置 Markdown 文本缓冲
 
             // 添加用户消息
             addMessage('user', question);
