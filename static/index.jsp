@@ -611,27 +611,36 @@
             cursor: not-allowed;
         }
 
-        /* 加载动画 */
+        /* 加载动画 - 思考中效果 */
         .typing-indicator {
             display: flex;
-            gap: 4px;
+            align-items: center;
             padding: 8px 12px;
         }
 
-        .typing-dot {
-            width: 8px;
-            height: 8px;
-            background: #667eea;
-            border-radius: 50%;
-            animation: typingBounce 1.4s infinite ease-in-out;
+        .typing-text {
+            font-size: 15px;
+            color: #667eea;
+            margin-right: 4px;
         }
 
-        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
-        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        .typing-dots {
+            display: inline-flex;
+        }
 
-        @keyframes typingBounce {
-            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
-            40% { transform: scale(1); opacity: 1; }
+        .typing-dot-text {
+            color: #667eea;
+            font-size: 15px;
+            animation: typingDot 1.4s infinite ease-in-out;
+        }
+
+        .typing-dot-text:nth-child(1) { animation-delay: 0s; }
+        .typing-dot-text:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot-text:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes typingDot {
+            0%, 80%, 100% { opacity: 0; }
+            40% { opacity: 1; }
         }
 
         /* ===== 移动端适配 ===== */
@@ -969,6 +978,7 @@
 
         let currentAiMessage = null;
         let currentSources = null;
+        let hasStartedStreaming = false; // 标记是否已开始显示内容
 
         function addMessage(role, content, sources = null) {
             // 隐藏欢迎消息
@@ -1089,9 +1099,12 @@
                 <div class="message-avatar avatar-ai">🤖</div>
                 <div class="message-content content-ai">
                     <div class="typing-indicator">
-                        <div class="typing-dot"></div>
-                        <div class="typing-dot"></div>
-                        <div class="typing-dot"></div>
+                        <span class="typing-text">思考中</span>
+                        <span class="typing-dots">
+                            <span class="typing-dot-text">.</span>
+                            <span class="typing-dot-text">.</span>
+                            <span class="typing-dot-text">.</span>
+                        </span>
                     </div>
                 </div>
             `;
@@ -1109,6 +1122,9 @@
         async function sendQuestion() {
             const question = questionInput.value.trim();
             if (!question) return;
+
+            // 重置流式状态
+            hasStartedStreaming = false;
 
             // 添加用户消息
             addMessage('user', question);
@@ -1130,9 +1146,7 @@
                     })
                 });
 
-                // 移除思考动画，创建流式消息容器
-                removeTypingIndicator();
-                addStreamingMessage();
+                // 注意：不移除思考动画，等待收到第一个内容数据时才移除
 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder('utf-8');
@@ -1158,6 +1172,12 @@
                     for (const line of lines) {
                         await processSSELine(line);
                     }
+                }
+
+                // 如果一直没有收到内容（异常情况），确保移除动画
+                if (!hasStartedStreaming) {
+                    removeTypingIndicator();
+                    addMessage('ai', '抱歉，未能获取有效回答。');
                 }
 
             } catch (error) {
@@ -1188,12 +1208,29 @@
                     const json = JSON.parse(data);
 
                     if (json.type === 'sources') {
-                        updateSources(json.content);
+                        // 先保存来源信息，等开始显示内容时再显示
+                        currentSources = json.content;
                     } else if (json.type === 'content') {
+                        // 收到第一个内容时，移除思考动画并创建流式消息容器
+                        if (!hasStartedStreaming) {
+                            removeTypingIndicator();
+                            addStreamingMessage();
+                            // 如果之前已收到来源信息，现在显示
+                            if (currentSources) {
+                                updateSources(currentSources);
+                            }
+                            hasStartedStreaming = true;
+                        }
                         updateStreamingContent(json.content);
                         // 每显示一个片段后等待，实现打字机效果
                         await sleep(50);
                     } else if (json.type === 'error') {
+                        // 收到错误时，移除思考动画并显示错误
+                        if (!hasStartedStreaming) {
+                            removeTypingIndicator();
+                            addStreamingMessage();
+                            hasStartedStreaming = true;
+                        }
                         updateStreamingContent(json.content);
                     }
                 } catch (e) {
