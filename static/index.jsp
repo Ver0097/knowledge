@@ -651,28 +651,24 @@
 
         /* Markdown 内容样式 */
         .markdown-content {
-            line-height: 1.7;
+            line-height: 1.6;
         }
 
         .markdown-content p {
-            margin: 0.5em 0;
-        }
-
-        .markdown-content p:first-child {
-            margin-top: 0;
-        }
-
-        .markdown-content p:last-child {
-            margin-bottom: 0;
+            margin: 0;
         }
 
         .markdown-content ul, .markdown-content ol {
-            margin: 0.5em 0;
+            margin: 0;
             padding-left: 1.5em;
         }
 
         .markdown-content li {
-            margin: 0.25em 0;
+            margin: 0;
+        }
+
+        .markdown-content li p {
+            margin: 0;
         }
 
         .markdown-content strong {
@@ -1049,7 +1045,7 @@
         let currentAiMessage = null;
         let currentSources = null;
         let hasStartedStreaming = false; // 标记是否已开始显示内容
-        let streamingMarkdownText = ''; // 保存流式输出的原始 Markdown 文本
+        let streamingText = ''; // 保存流式输出的纯文本
 
         function addMessage(role, content, sources = null) {
             // 隐藏欢迎消息
@@ -1123,35 +1119,17 @@
         }
 
         function updateStreamingContent(text) {
-            // 追加原始 Markdown 文本
-            streamingMarkdownText += text;
+            // 追加纯文本
+            streamingText += text;
 
-            // 流式过程中显示纯文本（避免不完整 Markdown 导致格式错乱）
+            // 压缩多余换行（超过2个换行变成1个）
+            const displayText = streamingText.replace(/\n{2,}/g, '\n');
+
             const contentEl = document.getElementById('streamingContent');
             if (contentEl) {
                 const textSpan = contentEl.querySelector('.streaming-text');
                 if (textSpan) {
-                    // 流式显示纯文本，保持原始换行
-                    textSpan.textContent = streamingMarkdownText;
-                }
-                scrollToBottom();
-            }
-        }
-
-        function renderFinalMarkdown() {
-            // 流式结束后，渲染完整的 Markdown
-            const contentEl = document.getElementById('streamingContent');
-            if (contentEl) {
-                const textSpan = contentEl.querySelector('.streaming-text');
-                if (textSpan && streamingMarkdownText) {
-                    try {
-                        // 最终渲染 Markdown 为 HTML
-                        textSpan.innerHTML = marked.parse(streamingMarkdownText);
-                        textSpan.classList.add('markdown-content');
-                    } catch (e) {
-                        // 渲染失败，保持纯文本
-                        console.warn('Markdown render error:', e);
-                    }
+                    textSpan.textContent = displayText;
                 }
                 scrollToBottom();
             }
@@ -1169,9 +1147,6 @@
         }
 
         function finalizeStream() {
-            // 渲染最终的 Markdown 格式
-            renderFinalMarkdown();
-
             // 清理 id，防止重复
             const contentEl = document.getElementById('streamingContent');
             if (contentEl) {
@@ -1222,7 +1197,7 @@
 
             // 重置流式状态
             hasStartedStreaming = false;
-            streamingMarkdownText = ''; // 重置 Markdown 文本缓冲
+            streamingText = ''; // 重置文本缓冲
 
             // 添加用户消息
             addMessage('user', question);
